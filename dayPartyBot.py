@@ -27,14 +27,12 @@ def normalize_twitter_username(text):
     return text
 
 
-
 # Twitter API credentials
 API_KEY = "API_KEY"
 API_SECRET = "API_SECRET"
 
 ACCESS_TOKEN = "ACCESS_TOKEN"
 ACCESS_TOKEN_SECRET = "ACCESS_TOKEN_SECRET"
-
 
 # Authentification Twitter
 api = tweepy.Client(access_token=ACCESS_TOKEN,
@@ -62,17 +60,19 @@ for key in responseSaint["response"]["prenoms"]["majeur"]:
 
 names = names[:-2]
 
-# dans responseSaint["response"]["prenoms"]["derives"] prendre 5 key random
-key = list(responseSaint["response"]["prenoms"]["derives"].keys())
 
-# take 5 random key
-random.shuffle(key)
-key = key[:7]
+if("derives" in responseSaint["response"]["prenoms"]):
+    # dans responseSaint["response"]["prenoms"]["derives"] prendre 5 key random
+    key = list(responseSaint["response"]["prenoms"]["derives"].keys())
 
-for k in key:
-    namesDer += k + ", "
+    # take 5 random key
+    random.shuffle(key)
+    key = key[:7]
 
-namesDer = namesDer[:-2]
+    for k in key:
+        namesDer += k + ", "
+
+    namesDer = namesDer[:-2]
 
 
 
@@ -90,9 +90,10 @@ if dateString in responseFerie:
 
 else:
     tweet += "🌟 Aujourd'hui, nous souhaitons une bonne fête à " + names
-    tweet += "\n\n"
-    tweet += "Mais aussi à " + namesDer + ", ..."
-
+    if(namesDer):
+        tweet += "\n\n"
+        tweet += "Mais aussi à " + namesDer + ", ..."
+    
 
 
 # # Envoi d'un tweet
@@ -104,13 +105,22 @@ tweet_id = tweetSend.data.get('id')
 
 for key in responseSaint["response"]["saints"]["majeurs"]:
     tweet = "✝️ [" + responseSaint["response"]["saints"]["majeurs"][key]["valeur"] +"]\n"
-    tweet += responseSaint["response"]["saints"]["majeurs"][key]["description"]
+    tweet += responseSaint["response"]["saints"]["majeurs"][key]["description"]    
 
-    if(len(tweet) > 280):
-        tweet = tweet[:280]
-        tweet = tweet[:tweet.rfind(".") + 1]
-
-    print(tweet)
+    if(len(tweet) > 278):
+        tweet = tweet[:278]
+        if(tweet.rfind(".") > 0):
+            tweet = tweet[:tweet.rfind(".") + 1]
+        elif(tweet.rfind("?") > 0):
+            tweet = tweet[:tweet.rfind("?") + 1]
+        elif(tweet.rfind("!") > 0):
+            tweet = tweet[:tweet.rfind("!") + 1]
+        elif(tweet.rfind(";") > 0):
+            tweet = tweet[:tweet.rfind(";")] + "..."
+        elif(tweet.rfind(",") > 0):
+            tweet = tweet[:tweet.rfind(",")] + "..."
+        else:
+            tweet = tweet[:tweet.rfind(" ")] + "..."
 
     tweetInfo = tweetSend = api.create_tweet(
         text= tweet,
