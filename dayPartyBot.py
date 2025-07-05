@@ -1,140 +1,130 @@
-import tweepy
+import os
 import requests
-import random
+import tweepy
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from unidecode import unidecode
+from dotenv import load_dotenv
 
-Month = [
+# Constantes
+MONTHS_FR = [
     "janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"
 ]
 
-DayOfTheWeek = [
+DAYS_FR = [
     "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"
 ]
 
-def normalize_twitter_username(text):
-    # Supprimer les accents
-    text = unidecode(text)
-    
-    # Remplacer les espaces et tirets par des underscores
-    text = text.replace(' ', '_').replace('-', '_')
-    
-    # Mettre tout en minuscules
-    text = text.lower()
-    
-    return text
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+}
+
+# Chargement des variables d'environnement
+load_dotenv()
 
 
-# Twitter API credentials
-API_KEY = "API_KEY"
-API_SECRET = "API_SECRET"
-
-ACCESS_TOKEN = "ACCESS_TOKEN"
-ACCESS_TOKEN_SECRET = "ACCESS_TOKEN_SECRET"
-
-# Authentification Twitter
-api = tweepy.Client(access_token=ACCESS_TOKEN,
-                    access_token_secret=ACCESS_TOKEN_SECRET,
-                    consumer_key=API_KEY,
-                    consumer_secret=API_SECRET)
-
-auth = tweepy.OAuthHandler(API_KEY, API_SECRET)
-auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
-apiOld = tweepy.API(auth)
-
-# add actual year
-responseFerie = requests.get("https://calendrier.api.gouv.fr/jours-feries/metropole.json")
-responseFerie = responseFerie.json()
-
-responseSaint = requests.get("https://nominis.cef.fr/json/nominis.php")
-responseSaint = responseSaint.json()
-
-names = ""
-namesDer = "" 
-
-# recupere les key de responseSaint["response"]["prenoms"]
-for key in responseSaint["response"]["prenoms"]["majeur"]:
-    names += key + ", "
-
-names = names[:-2]
+def normalize_twitter_username(text: str) -> str:
+    """Nettoie un nom pour l'utiliser en pseudo Twitter."""
+    return unidecode(text).replace(' ', '_').replace('-', '_').lower()
 
 
-if("derives" in responseSaint["response"]["prenoms"]):
-    # dans responseSaint["response"]["prenoms"]["derives"] prendre 5 key random
-    key = list(responseSaint["response"]["prenoms"]["derives"].keys())
+def get_api_clients():
+    """Initialise les clients Tweepy."""
+    api_key = os.getenv("API_KEY")
+    api_secret = os.getenv("API_SECRET")
+    access_token = os.getenv("ACCESS_TOKEN")
+    access_token_secret = os.getenv("ACCESS_TOKEN_SECRET")
 
-    # take 5 random key
-    random.shuffle(key)
-    key = key[:7]
-
-    for k in key:
-        namesDer += k + ", "
-
-    namesDer = namesDer[:-2]
-
-
-
-date = datetime.now()
-dateString = date.strftime("%Y-%m-%d")
-
-tweet = "[" + DayOfTheWeek[date.weekday()] +" " +str(date.day) + " " + Month[date.month - 1] + "]\n"
-
-if dateString in responseFerie:
-    tweet += "🎉 Aujourd'hui, est un jour férié en france Métropolitaine 🇫🇷 \n Nous fêtons ➡️ " + responseFerie[dateString] + " !"
-    tweet += "\n\n"
-    tweet += "Mais c'est aussi la fête de " + names
-
-    nameFerie = responseFerie[dateString]
-
-else:
-    tweet += "🌟 Aujourd'hui, nous souhaitons une bonne fête à " + names
-    if(namesDer):
-        tweet += "\n\n"
-        tweet += "Mais aussi à " + namesDer + ", ..."
-    
-
-
-# # Envoi d'un tweet
-tweetInfo = tweetSend = api.create_tweet(
-    text= tweet,
-)
-
-tweet_id = tweetSend.data.get('id')
-
-for key in responseSaint["response"]["saints"]["majeurs"]:
-    tweet = "✝️ [" + responseSaint["response"]["saints"]["majeurs"][key]["valeur"] +"]\n"
-    tweet += responseSaint["response"]["saints"]["majeurs"][key]["description"]    
-
-    if(len(tweet) > 278):
-        tweet = tweet[:278]
-        if(tweet.rfind(".") > 0):
-            tweet = tweet[:tweet.rfind(".") + 1]
-        elif(tweet.rfind("?") > 0):
-            tweet = tweet[:tweet.rfind("?") + 1]
-        elif(tweet.rfind("!") > 0):
-            tweet = tweet[:tweet.rfind("!") + 1]
-        elif(tweet.rfind(";") > 0):
-            tweet = tweet[:tweet.rfind(";")] + "..."
-        elif(tweet.rfind(",") > 0):
-            tweet = tweet[:tweet.rfind(",")] + "..."
-        else:
-            tweet = tweet[:tweet.rfind(" ")] + "..."
-
-    tweetInfo = tweetSend = api.create_tweet(
-        text= tweet,
-        in_reply_to_tweet_id=tweet_id,
+    client = tweepy.Client(
+        access_token=access_token,
+        access_token_secret=access_token_secret,
+        consumer_key=api_key,
+        consumer_secret=api_secret
     )
 
-    tweet_id = tweetSend.data.get('id')
+    legacy_auth = tweepy.OAuthHandler(api_key, api_secret)
+    legacy_auth.set_access_token(access_token, access_token_secret)
+    legacy_api = tweepy.API(legacy_auth)
 
-pingUsers = ""
+    return client, legacy_api
 
-for key in responseSaint["response"]["prenoms"]["majeur"]:
-    pingUsers += "@" + normalize_twitter_username(key) + " "
 
-tweetSend = api.create_tweet(
-    text= "👀 Happy Saint " + pingUsers + " !", 
-    in_reply_to_tweet_id=tweet_id,
-)
+def fetch_json(url: str) -> dict:
+    """Récupère et retourne une réponse JSON."""
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Erreur lors de la récupération de {url} : {e}")
+        return {}
+
+
+def build_tweet_intro(today: datetime, name: str, holiday: str = None) -> str:
+    """Construit le tweet principal."""
+    date_str = f"[{DAYS_FR[today.weekday()]} {today.day} {MONTHS_FR[today.month - 1]}]"
+    if holiday:
+        return (
+            f"{date_str}\n🎉 Aujourd'hui, est un jour férié en France Métropolitaine 🇫🇷\n"
+            f"Nous fêtons ➡️ {holiday} !\n\n"
+            f"Mais c'est aussi la fête de {name}"
+        )
+    return f"{date_str}\n🌟 Aujourd'hui, nous souhaitons une bonne fête à {name}"
+
+
+def build_saints_tweet(saints: list) -> str:
+    """Construit le tweet de la liste des saints, tronqué à 278 caractères si nécessaire."""
+    tweet = "✝️ Nous fêtons également les "
+    tweet += ", ".join(f"Saint {saint['name']}" for saint in saints)
+    tweet += " !"
+
+    if len(tweet) > 278:
+        cut_pos = tweet.rfind(",", 0, 278)
+        tweet = tweet[:cut_pos] + "..."
+    return tweet
+
+
+def main():
+    # Initialisation
+    client, _ = get_api_clients()
+    today = datetime.now()
+    today_str = today.strftime("%Y-%m-%d")
+    api_key_fete = os.getenv("API_KEY_FETE_DU_JOUR")
+
+    # Données
+    jours_feries = fetch_json("https://calendrier.api.gouv.fr/jours-feries/metropole.json")
+    fete_du_jour = fetch_json(f"https://fetedujour.fr/api/v2/{api_key_fete}/json")
+    saints_du_jour = fetch_json(f"https://fetedujour.fr/api/v2/{api_key_fete}/json-saints")
+
+    # Construction du tweet principal
+    holiday_name = jours_feries.get(today_str)
+    main_tweet_text = build_tweet_intro(today, fete_du_jour.get("name", "quelqu’un"), holiday_name)
+
+    # Envoi du tweet principal
+    try:
+        main_tweet = client.create_tweet(text=main_tweet_text)
+        tweet_id = main_tweet.data.get("id")
+    except Exception as e:
+        print(f"Erreur lors de l'envoi du tweet principal : {e}")
+        return
+
+    # Tweet de réponse avec les saints
+    try:
+        saints_tweet = build_saints_tweet(saints_du_jour.get("saints", []))
+        reply = client.create_tweet(text=saints_tweet, in_reply_to_tweet_id=tweet_id)
+        tweet_id = reply.data.get("id")
+    except Exception as e:
+        print(f"Erreur lors de l'envoi du tweet des saints : {e}")
+
+    # Mention personnalisée
+    try:
+        username = normalize_twitter_username(fete_du_jour.get("name", ""))
+        client.create_tweet(text=f"👀 Bonne Fête @{username} !", in_reply_to_tweet_id=tweet_id)
+    except Exception as e:
+        print(f"Erreur lors de l'envoi du ping utilisateur : {e}")
+
+
+if __name__ == "__main__":
+    main()
